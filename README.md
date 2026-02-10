@@ -75,7 +75,7 @@ Albert is not on the Chrome Web Store — you install it manually as an unpacked
 **Option A — Clone with Git:**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/albert.git
+git clone https://github.com/JanUmansky/albert.git
 ```
 
 **Option B — Download ZIP:**
@@ -214,9 +214,10 @@ albert/
 - An API key for a supported LLM provider:
   - **Grok (xAI)** — [console.x.ai](https://console.x.ai)
 
-## Privacy
+## API Key & Privacy
 
-- Your API key is stored locally in Chrome's extension storage
+> **Albert does not ship with an API key.** You must bring your own key from a supported LLM provider. The key is stored locally in Chrome's extension storage and is **never** included in the source code or transmitted anywhere except in direct HTTPS calls to the provider's API.
+
 - Page content is sent to the selected LLM provider's API only when you make a request
 - No data is collected, tracked, or sent to any third party besides the LLM provider you configure
 - All generated elements and settings are stored locally on your device
