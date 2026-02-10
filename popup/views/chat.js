@@ -43,6 +43,20 @@ const ChatView = (() => {
       newChatBtn.addEventListener('click', handleNewChat);
     }
 
+    // Listen for progress updates from the service worker during tool-call loops
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message.type === 'CHAT_PROGRESS') {
+        const loadingEl = document.getElementById('chat-loading');
+        if (loadingEl) {
+          const statusEl = loadingEl.querySelector('.loading-status');
+          if (statusEl) {
+            statusEl.textContent = message.status || '';
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          }
+        }
+      }
+    });
+
     // Load existing conversation for this tab
     loadConversation();
   }
@@ -211,26 +225,103 @@ const ChatView = (() => {
     div.className = `msg ${type}`;
 
     if (type === 'assistant' && hasElement) {
-      // Add a small indicator that an element was created or updated
       const badge = document.createElement('span');
       badge.className = 'msg-element-badge';
       badge.textContent = isElementUpdate ? 'Element updated' : 'Element added';
       div.appendChild(badge);
     }
 
-    const content = document.createElement('span');
-    content.textContent = text;
-    div.appendChild(content);
+    const content = document.createElement('div');
+    content.className = 'msg-content';
 
+    if (type === 'assistant') {
+      // Render markdown for assistant messages
+      content.innerHTML = renderMarkdown(text);
+    } else {
+      content.textContent = text;
+    }
+
+    div.appendChild(content);
     messagesContainer.appendChild(div);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
     return div;
   }
 
+  /**
+   * Lightweight markdown → HTML renderer.
+   * Handles: bold, italic, inline code, code blocks, headings, lists, line breaks.
+   * Escapes all HTML first to prevent injection.
+   */
+  function renderMarkdown(text) {
+    // Escape HTML entities
+    let s = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Protect fenced code blocks from inline processing
+    const codeBlocks = [];
+    s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+      codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
+      return `\x00CB${codeBlocks.length - 1}\x00`;
+    });
+
+    // Protect inline code spans
+    const inlineCodes = [];
+    s = s.replace(/`([^`\n]+)`/g, (_, code) => {
+      inlineCodes.push(`<code>${code}</code>`);
+      return `\x00IC${inlineCodes.length - 1}\x00`;
+    });
+
+    // Bold: **text**
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    // Italic: *text*
+    s = s.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+
+    // Headings: ## through #### → bold line
+    s = s.replace(/^#{1,4}\s+(.+)$/gm, '<strong class="md-heading">$1</strong>');
+
+    // Unordered lists: group consecutive "- item" or "* item" lines
+    s = s.replace(/(?:^[*-]\s+.+(?:\n|$))+/gm, match => {
+      const items = match.trim().split('\n')
+        .map(line => `<li>${line.replace(/^[*-]\s+/, '')}</li>`)
+        .join('');
+      return `<ul>${items}</ul>\n`;
+    });
+
+    // Ordered lists: group consecutive "1. item" lines
+    s = s.replace(/(?:^\d+\.\s+.+(?:\n|$))+/gm, match => {
+      const items = match.trim().split('\n')
+        .map(line => `<li>${line.replace(/^\d+\.\s+/, '')}</li>`)
+        .join('');
+      return `<ol>${items}</ol>\n`;
+    });
+
+    // Double newlines → paragraph break
+    s = s.replace(/\n{2,}/g, '<br><br>');
+    // Single newlines → line break (but not right before/after block elements)
+    s = s.replace(/\n/g, '<br>');
+
+    // Clean up stray <br> around block elements
+    s = s.replace(/<br>(<\/?(?:ul|ol|pre|li))/g, '$1');
+    s = s.replace(/(<\/?(?:ul|ol|pre)>)<br>/g, '$1');
+
+    // Restore protected code blocks and inline codes
+    s = s.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[i]);
+    s = s.replace(/\x00IC(\d+)\x00/g, (_, i) => inlineCodes[i]);
+
+    return s;
+  }
+
   function addLoading() {
     const div = document.createElement('div');
     div.className = 'msg-loading';
-    div.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+    div.id = 'chat-loading';
+    div.innerHTML = `
+      <div class="loading-dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+      <div class="loading-status"></div>
+    `;
     messagesContainer.appendChild(div);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
     return div;

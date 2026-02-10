@@ -404,8 +404,11 @@ const ElementsView = (() => {
   }
 
   async function handleDelete(id) {
+    // Confirm before deleting
+    if (!confirm('Delete this element? This cannot be undone.')) return;
+
     await AlbertStorage.removeElement(id);
-    // Notify content script to remove
+    // Remove from page and reload to get a clean state
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab && tab.id) {
@@ -413,11 +416,12 @@ const ElementsView = (() => {
           type: 'REMOVE_ELEMENT',
           elementId: id,
         });
+        chrome.tabs.reload(tab.id);
       }
     } catch {
       // Tab may not be accessible
     }
-    // Re-render
+    // Re-render the elements list
     render();
   }
 

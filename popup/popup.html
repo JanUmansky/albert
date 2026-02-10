@@ -86,6 +86,13 @@
 
     <div class="settings-body">
       <div class="form-group">
+        <label for="setting-provider">LLM Provider</label>
+        <select id="setting-provider">
+          <!-- Populated dynamically from AlbertLLM.getProviders() -->
+        </select>
+      </div>
+
+      <div class="form-group">
         <label for="setting-api-key">API Key</label>
         <div class="input-with-toggle">
           <input type="password" id="setting-api-key" placeholder="xai-..." autocomplete="off">
@@ -96,14 +103,13 @@
             </svg>
           </button>
         </div>
-        <span class="form-hint">Get your key at <a href="https://console.x.ai" target="_blank">console.x.ai</a></span>
+        <span id="api-key-hint" class="form-hint">Get your key at <a href="https://console.x.ai" target="_blank">console.x.ai</a></span>
       </div>
 
       <div class="form-group">
         <label for="setting-model">Model</label>
         <select id="setting-model">
-          <option value="grok-3">Grok 3</option>
-          <option value="grok-3-mini">Grok 3 Mini</option>
+          <!-- Populated dynamically based on selected provider -->
         </select>
       </div>
 
@@ -220,6 +226,7 @@
 
   <!-- Scripts -->
   <script src="../lib/storage.js"></script>
+  <script src="../lib/llm.js"></script>
   <script src="../lib/syntax-highlight.js"></script>
   <script src="views/chat.js"></script>
   <script src="views/settings.js"></script>

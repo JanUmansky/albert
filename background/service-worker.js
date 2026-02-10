@@ -5,6 +5,67 @@
  */
 
 importScripts('/lib/storage.js');
+importScripts('/lib/llm.js');
+
+// ── Progress Feedback ───────────────────────────────────
+
+/**
+ * Send a progress status update to the popup/side panel.
+ * The chat UI listens for these to show what the service worker
+ * is doing during multi-step operations (e.g. tool-call loops).
+ */
+function sendProgress(status) {
+  try {
+    chrome.runtime.sendMessage({ type: 'CHAT_PROGRESS', status }).catch(() => {});
+  } catch {
+    // Popup/panel might not be open — ignore silently
+  }
+}
+
+/**
+ * Convert a CSS selector into a short, human-friendly label.
+ * e.g. "#data-grid" → "#data-grid"
+ *      ".results-table" → ".results-table"
+ *      "main > section:nth-child(2)" → "a page section"
+ *      "table.users" → "the .users table"
+ */
+function friendlySelector(selector) {
+  if (!selector) return 'a page section';
+  const s = selector.trim();
+
+  // ID selector: "#foo" or "tag#foo"
+  const idMatch = s.match(/#([\w-]+)/);
+  if (idMatch) return `#${idMatch[1]}`;
+
+  // Class selector: ".foo" or "tag.foo"
+  const classMatch = s.match(/\.([\w-]+)/);
+  if (classMatch) {
+    // If there's a tag before the class, include it
+    const tagMatch = s.match(/^(\w+)\./);
+    if (tagMatch) return `the .${classMatch[1]} ${tagMatch[1]}`;
+    return `.${classMatch[1]}`;
+  }
+
+  // data-testid
+  const testidMatch = s.match(/\[data-testid="([^"]+)"\]/);
+  if (testidMatch) return `[${testidMatch[1]}]`;
+
+  // ARIA role
+  const roleMatch = s.match(/\[role="([^"]+)"\]/);
+  if (roleMatch) return `the ${roleMatch[1]} region`;
+
+  // Plain tag (possibly with child combinator)
+  const tagOnly = s.match(/^(\w+)$/);
+  if (tagOnly) {
+    const tag = tagOnly[1];
+    const friendlyTags = { main: 'main content', nav: 'navigation', header: 'header', footer: 'footer', aside: 'sidebar', table: 'table', form: 'form', ul: 'list', ol: 'list', section: 'section', article: 'article' };
+    return `the ${friendlyTags[tag] || tag}`;
+  }
+
+  // Fallback: if selector is short enough, show it; otherwise abbreviate
+  if (s.length <= 30) return s;
+  return 'a page section';
+}
 
 // ── Side Panel Setup ────────────────────────────────────
 
@@ -65,10 +126,12 @@ async function handleChat({ prompt, tabId, tabUrl }) {
   // 1. Validate settings
   const settings = await AlbertStorage.getSettings();
   if (!settings.apiKey) {
-    return { error: 'No API key configured. Please go to Settings and add your xAI API key.' };
+    const providerName = AlbertLLM.getProvider(settings.provider)?.name || settings.provider;
+    return { error: `No API key configured. Please go to Settings and add your ${providerName} API key.` };
   }
 
   // 2. Get page context from content script
+  sendProgress('Reading the page');
   let pageContext;
   try {
     pageContext = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
@@ -111,11 +174,87 @@ async function handleChat({ prompt, tabId, tabUrl }) {
   const systemPrompt = buildSystemPrompt();
   const messages = buildMessages(systemPrompt, conversationHistory, prompt, pageContext, existingElements);
 
-  // 7. Call xAI Grok API
+  // 7. Call LLM API with inspect loop
+  //    The LLM can request specific page sections by returning an "inspect"
+  //    field with CSS selectors. We fetch those DOM fragments and send them
+  //    back so the LLM can give a complete answer. Up to MAX_INSPECT_ROUNDS.
   let llmResponse;
   try {
-    llmResponse = await callGrokAPI(settings, messages);
+    const MAX_INSPECT_ROUNDS = 3;
+    let currentMessages = [...messages];
+
+    sendProgress('Thinking');
+
+    for (let round = 0; round <= MAX_INSPECT_ROUNDS; round++) {
+      let content;
+      try {
+        content = await AlbertLLM.callLLM(settings, currentMessages);
+      } catch (apiErr) {
+        console.error('[Albert] API call failed in round', round, apiErr);
+        throw apiErr;
+      }
+
+      // Try to parse the response and check for inspect requests
+      let inspectSelectors = null;
+      if (round < MAX_INSPECT_ROUNDS) {
+        try {
+          const parsed = extractJSON(content);
+          if (parsed && parsed.inspect && Array.isArray(parsed.inspect) && parsed.inspect.length > 0) {
+            inspectSelectors = parsed.inspect;
+          }
+        } catch {
+          // Not valid JSON or no inspect field — treat as final response
+        }
+      }
+
+      if (inspectSelectors) {
+        console.log('[Albert] LLM requested DOM inspection:', inspectSelectors);
+        sendProgress('Looking deeper into the page');
+
+        // Fetch each requested DOM fragment from the content script
+        let fragmentsContext = '';
+        for (let i = 0; i < inspectSelectors.length; i++) {
+          const selector = inspectSelectors[i];
+          sendProgress(`Getting ${friendlySelector(selector)} (${i + 1}/${inspectSelectors.length})`);
+          try {
+            const result = await chrome.tabs.sendMessage(tabId, {
+              type: 'GET_DOM_FRAGMENT',
+              selector,
+              maxLength: 8000,
+            });
+            if (result.error) {
+              fragmentsContext += `\n\n[Fragment "${selector}" — Error: ${result.error}]`;
+            } else {
+              fragmentsContext += `\n\n[DOM Fragment — selector: "${result.selector}", tag: <${result.tag}>, direct children: ${result.childCount}${result.truncated ? ', truncated at 8000 chars' : ''}]\n${result.html}`;
+            }
+          } catch (err) {
+            console.warn('[Albert] GET_DOM_FRAGMENT failed for', selector, err.message);
+            fragmentsContext += `\n\n[Fragment "${selector}" — Error: could not access the page]`;
+          }
+        }
+
+        // Feed the assistant's inspect request and the fetched fragments
+        // back into the conversation so the LLM can give a complete answer
+        currentMessages.push({ role: 'assistant', content });
+        currentMessages.push({
+          role: 'user',
+          content: `[Here are the DOM fragments you requested]${fragmentsContext}\n\nNow please provide your full answer using this additional page content. Respond with a valid JSON object as specified in your instructions.`,
+        });
+
+        sendProgress('Putting it all together');
+        continue; // loop back for the LLM's next response
+      }
+
+      // No inspect request — this is the final response
+      llmResponse = content;
+      break;
+    }
+
+    if (!llmResponse) {
+      llmResponse = '{"message": "I was unable to complete the request. Please try again."}';
+    }
   } catch (err) {
+    console.error('[Albert] Chat error:', err);
     return { error: 'LLM API error: ' + err.message };
   }
 
@@ -141,6 +280,39 @@ async function handleChat({ prompt, tabId, tabUrl }) {
 
     if (existingElement) {
       // ── Update existing element ──
+
+      // Resolve the final code (LLM value or fallback to existing)
+      const newJs  = parsed.element.js  || existingElement.code?.js  || '';
+      const newCss = parsed.element.css || existingElement.code?.css || '';
+      const oldJs  = existingElement.code?.js  || '';
+      const oldCss = existingElement.code?.css || '';
+
+      // Verify the LLM actually changed the code, not just claimed to
+      const jsChanged  = newJs.trim()  !== oldJs.trim();
+      const cssChanged = newCss.trim() !== oldCss.trim();
+
+      if (!jsChanged && !cssChanged) {
+        // LLM returned identical code — don't save, don't reload
+        console.warn('[Albert] False update: LLM claimed changes but code is identical.');
+
+        const honestMessage = (parsed.message || '') +
+          '\n\n⚠️ No actual code changes were detected — the returned code is identical to the existing version. Try being more specific about what you want changed.';
+
+        await AlbertStorage.addToConversation(tabUrl, {
+          role: 'assistant',
+          content: honestMessage,
+          timestamp: new Date().toISOString(),
+          hasElement: false,
+          isElementUpdate: false,
+        });
+
+        return {
+          message: honestMessage,
+          hasElement: false,
+          isElementUpdate: false,
+        };
+      }
+
       isUpdate = true;
 
       // First remove the old element from the page
@@ -153,14 +325,13 @@ async function handleChat({ prompt, tabId, tabUrl }) {
         // Content script may not be reachable
       }
 
-      // Update in storage — fall back to existing code if the LLM omitted a part
-      // (e.g. the user only asked to change CSS, so the LLM may not return JS)
+      // Update in storage with the verified-changed code
       const updates = {
         name: parsed.element.name || existingElement.name,
         description: parsed.element.description || existingElement.description,
         code: {
-          js: parsed.element.js || existingElement.code?.js || '',
-          css: parsed.element.css || existingElement.code?.css || '',
+          js: newJs,
+          css: newCss,
         },
       };
       element = await AlbertStorage.updateElement(existingElement.id, updates);
@@ -234,7 +405,8 @@ async function handleElementCodeChat({ elementId, codeType, prompt, tabId, tabUr
   // 1. Validate settings
   const settings = await AlbertStorage.getSettings();
   if (!settings.apiKey) {
-    return { error: 'No API key configured. Please go to Settings and add your xAI API key.' };
+    const providerName = AlbertLLM.getProvider(settings.provider)?.name || settings.provider;
+    return { error: `No API key configured. Please go to Settings and add your ${providerName} API key.` };
   }
 
   // 2. Get the element from storage
@@ -259,7 +431,7 @@ async function handleElementCodeChat({ elementId, codeType, prompt, tabId, tabUr
   // 5. Call LLM
   let llmResponse;
   try {
-    llmResponse = await callGrokAPI(settings, messages);
+    llmResponse = await AlbertLLM.callLLM(settings, messages);
   } catch (err) {
     return { error: 'LLM API error: ' + err.message };
   }
@@ -390,7 +562,7 @@ async function handleElementLLMCall({ prompt, options }) {
   ];
 
   try {
-    const result = await callGrokAPI(settings, messages);
+    const result = await AlbertLLM.callLLM(settings, messages);
     return { result };
   } catch (err) {
     return { error: 'LLM API error: ' + err.message };
@@ -414,8 +586,17 @@ You MUST always respond with a valid JSON object. No markdown fences, no extra t
 
 ### For questions / conversation (no code needed):
 {
-  "message": "Your conversational response here. Be helpful, concise, and friendly."
+  "message": "Your response here with **markdown formatting**."
 }
+
+The "message" field supports markdown. When answering questions about the page (structure, technologies, content, styling, scripts, etc.), format your response for clarity:
+- Use **bold** for labels, key terms, and emphasis
+- Use bullet lists (\`- item\`) for multiple items, technologies, properties, etc.
+- Use numbered lists (\`1. step\`) for sequential steps or rankings
+- Use \`inline code\` for CSS selectors, class names, HTML tags, JS variables, URLs, file names
+- Use fenced code blocks (\`\`\`lang ... \`\`\`) when showing code snippets
+- Use ## or ### headings to organize longer answers into sections
+- Keep paragraphs short — prefer structured lists over dense prose
 
 ### When creating a NEW element:
 {
@@ -510,9 +691,31 @@ if (!container) throw new Error('Main container not found');
 11. **Use \`__albertLLM()\` when the user's request implies AI-powered functionality** — e.g. enhancing, summarizing, rewriting, translating, analyzing, or generating text. The function is async (returns a Promise). Always show a loading state while waiting and handle errors gracefully. Provide a clear \`systemPrompt\` in options to get the best results.
 12. **When positioning elements on the page, ensure the parent/container has the correct CSS context.** For example, if you use \`position: absolute\` on the injected element, the target container must have \`position: relative\` (or \`absolute\`/\`fixed\`/\`sticky\`) — otherwise the element will be positioned relative to the viewport or a distant ancestor instead of the intended container. Apply the necessary positioning CSS to the container via JS (e.g. \`container.style.position = 'relative'\`) or via a CSS rule targeting the container. Always check whether the container already has a non-static position before overriding it.
 
+## Inspecting more of the page (truncated HTML)
+
+The initial page HTML may be **truncated** on large pages. When you need to see more of the page, you can request specific DOM sections by responding with an \`"inspect"\` field containing CSS selectors:
+
+### When you need to see more HTML before answering:
+{
+  "inspect": ["table.results", "#data-container", "main > section:nth-child(2)"],
+  "message": "Let me look at that table in detail..."
+}
+
+I will fetch the HTML for each selector and send it back to you. Then you can give a complete answer.
+
+**When to use inspect:**
+- The provided HTML was truncated and the content you need is beyond the cutoff
+- You need the full contents of a specific container (e.g. all rows of a table, all items in a list, a form with all fields)
+- The user asks about content not visible in the initial HTML
+
+**How to pick selectors:** When HTML is truncated, a **DOM Structure Outline** is included showing the full page skeleton with tag names, IDs, classes, and child counts. Use it to identify the right CSS selectors.
+
+You can include up to 5 selectors per inspect request. You may be called back up to 3 times.
+
 ## General guidelines:
-- Keep answers concise but informative
-- When analyzing the page, reference specific elements you can see in the HTML
+- Keep answers concise but informative — use markdown formatting to structure responses clearly
+- When analyzing the page, reference specific elements you can see in the HTML — use \`inline code\` for tag names, classes, IDs, and selectors
+- When listing technologies, styles, scripts, or page features, use **bullet lists** with bold labels
 - If the user's request is ambiguous, ask a clarifying question
 - You have full conversation history, so you can reference previous messages
 - Return ONLY the JSON object, nothing else`;
@@ -552,16 +755,24 @@ function buildPageContextMessage(pageContext) {
   // Truncate HTML to avoid exceeding token limits
   const maxHtmlLength = 12000;
   let html = pageContext.html || '';
-  if (html.length > maxHtmlLength) {
-    html = html.substring(0, maxHtmlLength) + '\n<!-- ... truncated ... -->';
+  const wasTruncated = html.length > maxHtmlLength;
+
+  if (wasTruncated) {
+    html = html.substring(0, maxHtmlLength) + '\n<!-- ... HTML truncated. Respond with {"inspect": ["selector"]} to retrieve specific sections. ... -->';
   }
 
   let ctx = `[Page Context — this is the webpage the user is currently viewing]
 URL: ${pageContext.url}
 Title: ${pageContext.title}
 
-Simplified HTML:
+Simplified HTML${wasTruncated ? ' (TRUNCATED — full page is larger, respond with {"inspect": [...selectors]} to see specific sections)' : ''}:
 ${html}`;
+
+  // When truncated, include a DOM outline so the LLM can see the full page structure
+  // and pick the right selectors for inspect requests
+  if (wasTruncated && pageContext.outline) {
+    ctx += `\n\n[DOM Structure Outline — full page skeleton so you can identify which sections to request via "inspect"]\n${pageContext.outline}`;
+  }
 
   // Add verified structural landmarks — these selectors have been tested
   // on the live page and are known to work right now.
@@ -598,45 +809,6 @@ ${summaries.join('\n\n')}
 
 If the user asks to change, update, modify, tweak, fix, or adjust any of the above elements, use the "elementId" field in your response to update it instead of creating a new one.
 CRITICAL: When modifying an element, only change the part (JS or CSS) that the user is asking about. Copy the other part verbatim from the current code shown above.`;
-}
-
-// ── xAI Grok API ────────────────────────────────────────
-
-async function callGrokAPI(settings, messages) {
-  const url = (settings.baseUrl || 'https://api.x.ai/v1').replace(/\/+$/, '') + '/chat/completions';
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${settings.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: settings.model || 'grok-3',
-      messages,
-      temperature: 0.3,
-      max_tokens: 4096,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    let errorMsg = `API returned status ${response.status}`;
-    try {
-      const parsed = JSON.parse(errorBody);
-      errorMsg = parsed.error?.message || errorMsg;
-    } catch {}
-    throw new Error(errorMsg);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('Empty response from API');
-  }
-
-  return content;
 }
 
 // ── Response Parsing ────────────────────────────────────
@@ -677,6 +849,22 @@ function parseLLMResponse(responseText) {
   }
 
   return result;
+}
+
+/**
+ * Extract a JSON object from a string that may contain markdown fences
+ * or extra text. Returns the parsed object or null if parsing fails.
+ */
+function extractJSON(text) {
+  let str = (text || '').trim();
+  // Strip markdown code fences
+  str = str.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+  str = str.trim();
+  // Find JSON boundaries
+  const first = str.indexOf('{');
+  const last = str.lastIndexOf('}');
+  if (first === -1 || last <= first) return null;
+  return JSON.parse(str.substring(first, last + 1));
 }
 
 // ── DOM Helper Injection ────────────────────────────────

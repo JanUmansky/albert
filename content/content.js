@@ -39,6 +39,10 @@
         }
         sendResponse({ success: true });
         break;
+
+      case 'GET_DOM_FRAGMENT':
+        sendResponse(getDomFragment(message.selector, message.maxLength));
+        break;
     }
     return false;
   });
@@ -49,31 +53,30 @@
     // Build a simplified representation of the page
     const html = getSimplifiedHTML();
     const landmarks = getPageLandmarks();
+    const outline = getDomOutline();
     return {
       url: window.location.href,
       title: document.title,
-      html: html,
-      landmarks: landmarks,
+      html,
+      landmarks,
+      outline,
     };
   }
 
-  function getSimplifiedHTML() {
-    // Clone the body and strip out noise
-    const clone = document.body.cloneNode(true);
-
-    // Remove scripts, styles, SVGs, and Albert-injected elements
+  /**
+   * Strip noise from a cloned DOM node: remove scripts, styles, SVGs,
+   * hidden elements, Albert-injected elements, and unnecessary attributes.
+   * Modifies the node in place.
+   */
+  function simplifyNode(clone) {
     const removeTags = ['script', 'style', 'svg', 'noscript', 'iframe'];
     removeTags.forEach(tag => {
       clone.querySelectorAll(tag).forEach(el => el.remove());
     });
 
-    // Remove Albert-injected elements
     clone.querySelectorAll('[data-albert-id]').forEach(el => el.remove());
-
-    // Remove hidden elements
     clone.querySelectorAll('[hidden], [aria-hidden="true"]').forEach(el => el.remove());
 
-    // Simplify: remove excessive attributes but keep important ones
     const keepAttrs = ['id', 'class', 'name', 'type', 'value', 'placeholder',
       'href', 'src', 'action', 'method', 'role', 'aria-label',
       'data-testid', 'for', 'title', 'alt'];
@@ -85,17 +88,116 @@
           el.removeAttribute(attr.name);
         }
       });
-      // Remove inline styles to reduce noise
       el.removeAttribute('style');
     });
+  }
 
-    // Get the simplified HTML
+  function getSimplifiedHTML() {
+    const clone = document.body.cloneNode(true);
+    simplifyNode(clone);
     let html = clone.innerHTML;
-
-    // Collapse whitespace
     html = html.replace(/\s{2,}/g, ' ').trim();
-
     return html;
+  }
+
+  /**
+   * Retrieve the simplified HTML of a specific element on the page.
+   * Used by the LLM's get_dom_fragment tool to inspect specific sections.
+   */
+  function getDomFragment(selector, maxLength = 8000) {
+    try {
+      const el = document.querySelector(selector);
+      if (!el) {
+        return { error: `No element found matching "${selector}"` };
+      }
+
+      const clone = el.cloneNode(true);
+      simplifyNode(clone);
+
+      let html = clone.outerHTML;
+      html = html.replace(/\s{2,}/g, ' ').trim();
+      const totalLength = html.length;
+      const truncated = totalLength > maxLength;
+
+      if (truncated) {
+        html = html.substring(0, maxLength) + '\n<!-- ... truncated ... -->';
+      }
+
+      return {
+        html,
+        selector,
+        tag: el.tagName.toLowerCase(),
+        childCount: el.children.length,
+        totalLength,
+        truncated,
+      };
+    } catch (err) {
+      return { error: `Error querying "${selector}": ${err.message}` };
+    }
+  }
+
+  /**
+   * Build a compact DOM outline showing the page structure.
+   * Helps the LLM identify which selectors to use when requesting
+   * specific DOM fragments via the get_dom_fragment tool.
+   */
+  function getDomOutline(maxDepth = 4) {
+    const lines = [];
+
+    function walk(el, depth) {
+      if (depth > maxDepth) return;
+      if (el.nodeType !== Node.ELEMENT_NODE) return;
+
+      const tag = el.tagName.toLowerCase();
+      if (['script', 'style', 'svg', 'noscript', 'link', 'meta'].includes(tag)) return;
+      if (el.hasAttribute('data-albert-id') || el.hasAttribute('data-albert-element')) return;
+      if (el.hidden || el.getAttribute('aria-hidden') === 'true') return;
+
+      let desc = tag;
+      if (el.id && /^[a-zA-Z][\w-]{0,40}$/.test(el.id)) desc += `#${el.id}`;
+
+      const stableClasses = Array.from(el.classList)
+        .filter(c => /^[a-zA-Z][\w-]{2,30}$/.test(c) && !/[0-9]{3,}/.test(c))
+        .slice(0, 2);
+      if (stableClasses.length > 0) desc += `.${stableClasses.join('.')}`;
+
+      const role = el.getAttribute('role');
+      if (role) desc += `[role="${role}"]`;
+
+      const childEls = Array.from(el.children).filter(c =>
+        c.nodeType === Node.ELEMENT_NODE &&
+        !['script', 'style', 'svg', 'noscript', 'link', 'meta'].includes(c.tagName.toLowerCase()) &&
+        !c.hasAttribute('data-albert-id')
+      );
+
+      const indent = '  '.repeat(depth);
+      const childInfo = childEls.length > 0 ? ` (${childEls.length} children)` : '';
+
+      // Add text preview for leaf elements
+      let textPreview = '';
+      if (childEls.length === 0) {
+        const text = el.textContent?.trim();
+        if (text && text.length > 0) {
+          textPreview = ` "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`;
+        }
+      }
+
+      lines.push(`${indent}${desc}${childInfo}${textPreview}`);
+
+      const maxChildren = depth < 2 ? 20 : 10;
+      const visibleChildren = childEls.slice(0, maxChildren);
+      visibleChildren.forEach(child => walk(child, depth + 1));
+
+      if (childEls.length > maxChildren) {
+        lines.push(`${'  '.repeat(depth + 1)}... and ${childEls.length - maxChildren} more children`);
+      }
+    }
+
+    if (document.body) {
+      walk(document.body, 0);
+    }
+
+    return lines.join('\n');
   }
 
   /**
