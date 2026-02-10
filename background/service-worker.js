@@ -267,6 +267,43 @@ async function handleChat({ prompt, tabId, tabUrl }) {
     parsed = { message: llmResponse };
   }
 
+  // 8b. Recovery: detect when the LLM put code in the message instead of the element field.
+  //     This happens when the LLM returns markdown code blocks in "message" but no "element".
+  //     We send a correction prompt asking it to restructure the response properly.
+  if (!parsed.element && looksLikeCodeInMessage(parsed.message)) {
+    console.warn('[Albert] Detected code in message without element field — requesting correction.');
+    sendProgress('Restructuring response');
+
+    try {
+      const correctionMessages = [
+        ...messages,
+        { role: 'assistant', content: llmResponse },
+        {
+          role: 'user',
+          content: `Your previous response included code inside the "message" field as markdown code blocks, but you did NOT include an "element" field. Code in the "message" field is NOT executed — it is only displayed as text. The user asked you to create or modify something on the page, so you MUST respond with the "element" field containing "js" and/or "css" keys with the actual code. Please re-send your response as a valid JSON object with the "element" field. Remember: "element.js" for JavaScript and "element.css" for CSS. Do NOT put code in the "message" field.`,
+        },
+      ];
+
+      const retryContent = await AlbertLLM.callLLM(settings, correctionMessages);
+      let retryParsed;
+      try {
+        retryParsed = parseLLMResponse(retryContent);
+      } catch {
+        retryParsed = null;
+      }
+
+      if (retryParsed && retryParsed.element) {
+        parsed = retryParsed;
+        console.log('[Albert] Correction successful — element field now present.');
+      } else {
+        console.warn('[Albert] Correction attempt did not produce an element field.');
+      }
+    } catch (retryErr) {
+      console.warn('[Albert] Correction LLM call failed:', retryErr.message);
+      // Fall through with original parsed response
+    }
+  }
+
   // 9. If the LLM returned an element, save and inject it
   let isUpdate = false;
   if (parsed.element) {
@@ -712,6 +749,28 @@ I will fetch the HTML for each selector and send it back to you. Then you can gi
 
 You can include up to 5 selectors per inspect request. You may be called back up to 3 times.
 
+## CRITICAL — When to use the "element" field vs. just "message":
+
+If the user asks you to **create, add, build, generate, make, insert, inject, or place** anything on the page — or to **modify, update, change, fix, tweak, or adjust** an existing element — you MUST respond with the \`"element"\` field containing real JS and/or CSS code. DO NOT put the code inside the \`"message"\` field as markdown code blocks. The code in \`"message"\` will NOT be executed — only code in \`"element.js"\` and \`"element.css"\` gets injected into the page.
+
+**WRONG** (code in message — nothing happens on the page):
+{
+  "message": "Here's a button for you:\\n\`\`\`javascript\\nconst btn = document.createElement('button');\\n...\`\`\`"
+}
+
+**CORRECT** (code in element — gets injected and runs):
+{
+  "message": "I added a button to the page.",
+  "element": {
+    "name": "Custom Button",
+    "description": "A button on the page",
+    "js": "const btn = document.createElement('button'); ...",
+    "css": ".albert-btn { ... }"
+  }
+}
+
+Only use a message-only response (no \`"element"\` field) when the user is asking a **question** or having a **conversation** that does NOT require injecting anything into the page.
+
 ## General guidelines:
 - Keep answers concise but informative — use markdown formatting to structure responses clearly
 - When analyzing the page, reference specific elements you can see in the HTML — use \`inline code\` for tag names, classes, IDs, and selectors
@@ -1144,6 +1203,48 @@ async function executeElementJS(tabId, jsCode, elementId) {
 }
 
 // ── Helpers ─────────────────────────────────────────────
+
+/**
+ * Detect when the LLM's response message contains code blocks that look like
+ * element code, suggesting it put the code in "message" instead of "element".
+ * Looks for fenced code blocks containing DOM manipulation, element creation,
+ * CSS rules, or typical patterns from generated elements.
+ */
+function looksLikeCodeInMessage(message) {
+  if (!message || typeof message !== 'string') return false;
+
+  // Must contain a fenced code block
+  const codeBlockMatch = message.match(/```(?:\w*)\s*\n([\s\S]*?)```/);
+  if (!codeBlockMatch) return false;
+
+  const codeContent = codeBlockMatch[1];
+
+  // Check for JS patterns that indicate element creation/injection
+  const jsPatterns = [
+    /document\.createElement\s*\(/,
+    /document\.querySelector\s*\(/,
+    /\.appendChild\s*\(/,
+    /\.insertBefore\s*\(/,
+    /\.innerHTML\s*=/,
+    /\.addEventListener\s*\(/,
+    /data-albert-element/,
+    /__albertFind/,
+    /\.prepend\s*\(/,
+    /\.append\s*\(/,
+    /\.insertAdjacentHTML\s*\(/,
+  ];
+
+  // Check for CSS patterns that indicate styling
+  const cssPatterns = [
+    /\.albert-[\w-]+\s*\{/,
+    /\{[^}]*(?:display|position|background|color|font-size|padding|margin|border|z-index)\s*:/,
+  ];
+
+  const hasJSCode = jsPatterns.some(p => p.test(codeContent));
+  const hasCSSCode = cssPatterns.some(p => p.test(codeContent));
+
+  return hasJSCode || hasCSSCode;
+}
 
 function extractHostname(url) {
   try {
