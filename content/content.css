@@ -1,0 +1,10 @@
+/*
+ * Albert — Content Script Base Styles
+ * Minimal reset scoped to Albert-injected elements.
+ * Generated element styles are injected dynamically.
+ */
+
+[data-albert-element] {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  box-sizing: border-box;
+}

@@ -1,0 +1,34 @@
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Secrets / environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE / editor config
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Dependencies (if project grows)
+node_modules/
+
+# Build output (if bundling is added)
+dist/
+build/
+out/
+
+# Extension distribution archives
+*.zip
+*.crx
+*.pem
+
+# Logs
+*.log
+npm-debug.log*

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Albert</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- ════════════════════════════════════════════════════
+       CHAT VIEW
+       ════════════════════════════════════════════════════ -->
+  <div id="view-chat" class="view active">
+    <header class="header">
+      <div class="header-title">
+        <span class="logo">A</span>
+        <div class="header-title-text">
+          <h1>Albert</h1>
+          <span id="header-tab-url" class="header-url"></span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-new-chat" class="icon-btn" title="New Chat">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+        </button>
+        <button id="btn-elements" class="icon-btn" title="My Elements">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
+            <rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+        </button>
+        <button id="btn-settings" class="icon-btn" title="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="chat-messages" class="chat-messages">
+      <div class="welcome-message">
+        <div class="welcome-icon">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <h2>Welcome to Albert</h2>
+        <p>Ask me anything about this page, or tell me to build something on it.</p>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="chat-input-wrapper">
+        <textarea id="chat-input" placeholder="Ask a question or describe what to build..." rows="1"></textarea>
+        <button id="btn-send" class="send-btn" disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════
+       SETTINGS VIEW
+       ════════════════════════════════════════════════════ -->
+  <div id="view-settings" class="view">
+    <header class="header">
+      <button id="btn-back-settings" class="icon-btn" title="Back">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+      <h1>Settings</h1>
+      <div style="width:36px"></div>
+    </header>
+
+    <div class="settings-body">
+      <div class="form-group">
+        <label for="setting-api-key">API Key</label>
+        <div class="input-with-toggle">
+          <input type="password" id="setting-api-key" placeholder="xai-..." autocomplete="off">
+          <button id="toggle-api-key" class="icon-btn small" title="Show/Hide">
+            <svg class="eye-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+        <span class="form-hint">Get your key at <a href="https://console.x.ai" target="_blank">console.x.ai</a></span>
+      </div>
+
+      <div class="form-group">
+        <label for="setting-model">Model</label>
+        <select id="setting-model">
+          <option value="grok-3">Grok 3</option>
+          <option value="grok-3-mini">Grok 3 Mini</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="setting-base-url">API Base URL</label>
+        <input type="text" id="setting-base-url" placeholder="https://api.x.ai/v1">
+      </div>
+
+      <div class="form-group">
+        <div class="setting-toggle-row">
+          <div class="setting-toggle-info">
+            <label>Element LLM Access</label>
+            <span class="form-hint">Allow elements to call the AI model for smart features (e.g. text enhancement, summarization)</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="setting-element-llm">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <button id="btn-save-settings" class="primary-btn">Save Settings</button>
+      <div id="settings-status" class="status-message"></div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════
+       ELEMENTS VIEW
+       ════════════════════════════════════════════════════ -->
+  <div id="view-elements" class="view">
+    <header class="header">
+      <button id="btn-back-elements" class="icon-btn" title="Back">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+      <h1>My Elements</h1>
+      <div style="width:36px"></div>
+    </header>
+
+    <div id="elements-filter" class="elements-filter"></div>
+    <div id="elements-list" class="elements-body">
+      <!-- Populated dynamically -->
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════
+       ELEMENT DETAIL VIEW
+       ════════════════════════════════════════════════════ -->
+  <div id="view-element-detail" class="view">
+    <header class="header">
+      <button id="btn-back-detail" class="icon-btn" title="Back to Elements">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+      <h1 id="detail-title" class="header-title-truncate">Element</h1>
+      <div style="width:36px"></div>
+    </header>
+
+    <div class="detail-body">
+      <div class="detail-meta">
+        <div id="detail-description" class="detail-description"></div>
+        <div id="detail-url" class="detail-url"></div>
+        <div id="detail-date" class="detail-date"></div>
+      </div>
+
+      <div class="detail-tabs">
+        <button class="detail-tab active" data-tab="js">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"/>
+            <polyline points="8 6 2 12 8 18"/>
+          </svg>
+          JavaScript
+        </button>
+        <button class="detail-tab" data-tab="css">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7h16"/>
+            <path d="M4 17h16"/>
+            <path d="M8 12h8"/>
+          </svg>
+          CSS
+        </button>
+      </div>
+
+      <div class="detail-code-container">
+        <div id="detail-code-js" class="detail-code-panel active">
+          <pre class="detail-code"><code id="detail-code-js-content"></code></pre>
+        </div>
+        <div id="detail-code-css" class="detail-code-panel">
+          <pre class="detail-code"><code id="detail-code-css-content"></code></pre>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Element Code Chat (pinned to bottom of view) -->
+    <div class="detail-chat">
+      <div id="detail-chat-messages" class="detail-chat-messages"></div>
+      <div class="detail-chat-input-area">
+        <div class="detail-chat-input-wrapper">
+          <textarea id="detail-chat-input" placeholder="Ask about or modify the code..." rows="1"></textarea>
+          <button id="detail-chat-send" class="send-btn" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="../lib/storage.js"></script>
+  <script src="../lib/syntax-highlight.js"></script>
+  <script src="views/chat.js"></script>
+  <script src="views/settings.js"></script>
+  <script src="views/elements.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
