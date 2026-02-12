@@ -51,7 +51,7 @@ Albert recognizes the existing element and updates only its CSS — no duplicate
 ## Features
 
 - **Chat Interface** — Describe the UI element you want in plain English
-- **AI-Powered Generation** — Uses your chosen LLM provider to analyze the page and generate code (currently supports Grok by xAI, with more providers coming soon)
+- **AI-Powered Generation** — Uses your chosen LLM provider to analyze the page and generate code (supports Grok by xAI and ChatGPT by OpenAI)
 - **Persistent Elements** — All customizations are saved locally and re-applied on page load
 - **Element Management** — View, toggle, or delete your elements from the Elements panel
 - **Element Code Chat** — Open any element's detail view to ask questions about its code or modify it directly
@@ -68,6 +68,7 @@ Albert is not on the Chrome Web Store — you install it manually as an unpacked
 - **Google Chrome** (or any Chromium-based browser: Edge, Brave, Arc, etc.)
 - **An API key for your chosen LLM provider** — currently supported:
   - **Grok (xAI)** — sign up and generate a key at [console.x.ai](https://console.x.ai)
+  - **ChatGPT (OpenAI)** — sign up and generate a key at [platform.openai.com](https://platform.openai.com/api-keys)
 - **Git** (optional — you can also download a ZIP)
 
 ### Step 1: Get the Code
@@ -100,11 +101,11 @@ git clone https://github.com/JanUmansky/albert.git
 
 1. Click the Albert icon in the toolbar to open the side panel
 2. Click the **gear icon** (Settings) in the top-right of the panel
-3. Select your **LLM Provider** from the dropdown (currently Grok by xAI)
+3. Select your **LLM Provider** from the dropdown (Grok by xAI or ChatGPT by OpenAI)
 4. Paste your API key into the **API Key** field — the placeholder and help link update automatically based on the selected provider
 5. Select your preferred model (the model list updates based on the selected provider):
-   - **Grok 3** — most capable, best for complex elements
-   - **Grok 3 Mini** — faster and cheaper, great for simple elements and experimentation
+   - **Grok 3** / **Grok 3 Mini** (xAI)
+   - **GPT-4o** / **GPT-4o Mini** / **o3-mini** (OpenAI)
 6. Optionally adjust the **API Base URL** if you're using a proxy or custom endpoint
 7. Click **Save Settings**
 
@@ -213,6 +214,7 @@ albert/
 - Google Chrome (or any Chromium-based browser)
 - An API key for a supported LLM provider:
   - **Grok (xAI)** — [console.x.ai](https://console.x.ai)
+  - **ChatGPT (OpenAI)** — [platform.openai.com](https://platform.openai.com/api-keys)
 
 ## API Key & Privacy
 
